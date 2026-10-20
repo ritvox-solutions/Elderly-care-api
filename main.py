@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List
 
 import paho.mqtt.client as mqtt
-from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -112,6 +112,11 @@ def alert_worker(event: TelemetryEvent):
 
 def alert_message(event: TelemetryEvent, alert: Alert) -> dict:
     """Convert a persisted backend alert to the browser WebSocket contract."""
+    return alert_record_message(alert, event.device_id)
+
+
+def alert_record_message(alert: Alert, device_id: str | None = None) -> dict:
+    """Convert a persisted alert to the shared web/mobile contract."""
     patient_name = None
     room_number = None
     if alert.patient_id:
@@ -126,7 +131,7 @@ def alert_message(event: TelemetryEvent, alert: Alert) -> dict:
     return {
         "type": "alert",
         "alert_id": str(alert.id),
-        "device_id": event.device_id,
+        "device_id": device_id or alert.device_id,
         "timestamp": created_at.isoformat(),
         "category": alert.category,
         "severity": alert.severity,
@@ -262,6 +267,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=settings.cors_allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -400,25 +406,51 @@ def latest(
     }
 
 @app.post("/api/v1/telemetry/ingest")
-async def ingest_telemetry_http(payload: dict):
+async def ingest_telemetry_http(
+    payload: dict,
+    x_telemetry_key: str | None = Header(default=None),
+):
     """
     HTTP Telemetry Ingestion Webhook.
     Allows microcontrollers or cloud relays to push telemetry directly over HTTP to Vercel.
     """
+    if settings.telemetry_ingest_key and x_telemetry_key != settings.telemetry_ingest_key:
+        raise HTTPException(status_code=401, detail="Invalid telemetry key")
+
     topic = payload.get("topic", "caretrack/http_ingest")
     event = parse_telemetry(topic, payload)
     if event is None:
         return {"status": "error", "message": "Invalid or unparseable telemetry payload"}
 
     store_event(event)
-    for message in broadcast_messages(event):
-        await manager.broadcast(message)
-    # Emergency evaluation (fall / critical vitals -> alert + caregiver email)
-    # happens off the event loop so SMTP latency never delays the webhook.
-    asyncio.get_running_loop().run_in_executor(None, alert_worker, event)
+    # Vercel may freeze the function after responding, so notification delivery
+    # must finish before this request completes.
+    alerts = await asyncio.to_thread(process_emergency, event)
+    for alert in alerts:
+        await manager.broadcast(alert_message(event, alert))
     return {
         "status": "success",
         "device_id": event.device_id,
         "readings_stored": len(event.readings),
+        "alerts_created": len(alerts),
         "timestamp": event.timestamp.isoformat(),
     }
+
+
+@app.get("/api/v1/alerts/latest")
+def latest_alerts(
+    device_ids: str | None = Query(default=None),
+    since: datetime | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Polling fallback for serverless deployments where WebSockets are not shared."""
+    query = db.query(Alert)
+    if device_ids:
+        ids = [value.strip() for value in device_ids.split(",") if value.strip()]
+        if ids:
+            query = query.filter(Alert.device_id.in_(ids))
+    if since:
+        query = query.filter(Alert.created_at > since)
+    rows = query.order_by(Alert.created_at.desc()).limit(limit).all()
+    return [alert_record_message(alert) for alert in rows]

@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     mqtt_password: str = ""
     mqtt_use_tls: bool | None = None
     cors_allowed_origins: str = "http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000"
+    cors_allowed_origin_regex: str = r"https://.*\.vercel\.app"
     ws_auth_token: str = ""
+    telemetry_ingest_key: str = ""
 
     # Emergency email notifications (fall detection / critical vitals).
     # Leave SMTP_HOST empty to keep the pipeline inert (alerts are still
