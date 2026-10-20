@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from database import engine, Base, SessionLocal, get_db
-from models import Alert, Device, DevicePairing, DeviceType, Reading
+from models import Alert, Device, DevicePairing, DeviceType, Patient, Reading
 from core.alerting import process_emergency
 from routers.auth import router as auth_router
 from routers.thresholds import router as thresholds_router
@@ -112,6 +112,14 @@ def alert_worker(event: TelemetryEvent):
 
 def alert_message(event: TelemetryEvent, alert: Alert) -> dict:
     """Convert a persisted backend alert to the browser WebSocket contract."""
+    patient_name = None
+    room_number = None
+    if alert.patient_id:
+        with SessionLocal() as session:
+            patient = session.query(Patient).filter(Patient.id == alert.patient_id).first()
+            if patient:
+                patient_name = f"{patient.first_name} {patient.last_name}"
+                room_number = patient.room_number
     created_at = alert.created_at
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
@@ -123,7 +131,10 @@ def alert_message(event: TelemetryEvent, alert: Alert) -> dict:
         "category": alert.category,
         "severity": alert.severity,
         "metric": alert.triggering_metric,
+        "value": alert.triggering_value,
         "message": alert.message,
+        "patient_name": patient_name,
+        "room_number": room_number,
     }
 
 

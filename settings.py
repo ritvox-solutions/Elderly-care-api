@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # e.g. a shared ward mailbox: "ward-a@hospital.org, oncall@hospital.org"
     alert_fallback_recipients: str = ""
 
+    # Optional when Expo enhanced push security is enabled.
+    expo_push_access_token: str = ""
+
     # Security & JWT
     secret_key: str = "caretrack-dev-secret-key-32-bytes-minimum-security-change-in-prod"
     algorithm: str = "HS256"

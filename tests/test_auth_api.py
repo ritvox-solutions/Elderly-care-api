@@ -1,4 +1,4 @@
-def test_register_and_login_flow(client):
+def test_register_and_login_flow(client, db_session):
     # 1. Register new caregiver
     reg_payload = {
         "email": "dr.smith@caretrack.org",
@@ -41,7 +41,14 @@ def test_register_and_login_flow(client):
     assert r_me_cookie.status_code == 200
     assert r_me_cookie.json()["email"] == "dr.smith@caretrack.org"
 
-    # 6. Logout
+    # 6. Register this authenticated caregiver's phone for fall pushes
+    push_token = "ExponentPushToken[demo_device_123456]"
+    r_push = client.put("/api/v1/auth/push-token", json={"token": push_token})
+    assert r_push.status_code == 200
+    from models import User
+    assert db_session.query(User).filter(User.email == reg_payload["email"]).one().expo_push_token == push_token
+
+    # 7. Logout
     r_logout = client.post("/api/v1/auth/logout")
     assert r_logout.status_code == 200
 
@@ -53,3 +60,9 @@ def test_unauthorized_access(client):
     client.cookies.clear()
     r = client.get("/api/v1/auth/me")
     assert r.status_code == 401
+
+    r_push = client.put(
+        "/api/v1/auth/push-token",
+        json={"token": "ExponentPushToken[demo_device_123456]"},
+    )
+    assert r_push.status_code == 401

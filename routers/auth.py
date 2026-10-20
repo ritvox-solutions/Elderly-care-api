@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User
 from models.audit_log import AuditLog
-from schemas.auth import UserRegisterRequest, UserLoginRequest, UserResponse, TokenResponse
+from schemas.auth import PushTokenRequest, UserRegisterRequest, UserLoginRequest, UserResponse, TokenResponse
 from core.security import hash_password, verify_password, create_access_token
 from core.dependencies import get_current_active_user
 import json
@@ -99,3 +99,17 @@ def logout(response: Response, current_user: User = Depends(get_current_active_u
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(current_user: User = Depends(get_current_active_user)):
     return current_user
+
+@router.put("/push-token")
+def register_push_token(
+    req: PushTokenRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    db.query(User).filter(
+        User.expo_push_token == req.token,
+        User.id != current_user.id,
+    ).update({User.expo_push_token: None}, synchronize_session=False)
+    current_user.expo_push_token = req.token
+    db.commit()
+    return {"status": "registered"}

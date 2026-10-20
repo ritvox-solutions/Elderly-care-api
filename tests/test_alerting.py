@@ -269,6 +269,27 @@ def test_smtp_failure_marks_notification_failed(db_session, scenario, monkeypatc
     assert "connection refused" in note.error_message
 
 
+def test_fall_sends_push_to_registered_caregiver(db_session, scenario, monkeypatch):
+    token = "ExponentPushToken[caregiver_device_123]"
+    scenario["caregiver"].expo_push_token = token
+    db_session.commit()
+    sent = {}
+    monkeypatch.setattr(email_transport, "send_smtp_mail", lambda **kwargs: (True, "sent"))
+    monkeypatch.setattr(
+        "core.alerting.send_expo_push",
+        lambda tokens, **kwargs: sent.update(tokens=tokens, **kwargs) or {token: (True, "ticket-1")},
+    )
+
+    alerts = process_emergency(fall_event(), db=db_session)
+
+    assert sent["tokens"] == [token]
+    assert sent["data"]["type"] == "fall_alert"
+    assert sent["data"]["room_number"] == "Room 312"
+    push_note = db_session.query(Notification).filter(Notification.channel == NotificationChannel.PUSH.value).one()
+    assert push_note.alert_id == alerts[0].id
+    assert push_note.status == NotificationStatus.DELIVERED.value
+
+
 def test_cooldown_suppresses_repeat_falls(db_session, scenario, monkeypatch):
     sends = []
     monkeypatch.setattr(

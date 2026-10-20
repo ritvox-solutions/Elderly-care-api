@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from core import email as email_transport
+from core.push import send_expo_push
 from core.ampv import AMPV_WINDOW_SECONDS, evaluate_ampv
 from database import SessionLocal
 from models import (
@@ -419,6 +420,38 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
                         status=status.value,
                         delivered_at=delivered_at,
                         error_message=None if status is NotificationStatus.DELIVERED else detail,
+                    )
+                )
+
+        fall_alert = next((alert for alert in created if alert.category == AlertCategory.FALL.value), None)
+        push_users = [user for user in caregivers if user.expo_push_token]
+        if fall_alert and push_users:
+            patient_name = label.rsplit(" (", 1)[0] if label else "Patient"
+            room_number = label.rsplit(" (", 1)[1].rstrip(")") if label and " (" in label else "Unknown room"
+            results = send_expo_push(
+                [user.expo_push_token for user in push_users],
+                title="CRITICAL: FALL DETECTED",
+                body=f"{patient_name}, {room_number}. Immediate assistance required.",
+                data={
+                    "type": "fall_alert",
+                    "alert_id": str(fall_alert.id),
+                    "patient_name": patient_name,
+                    "room_number": room_number,
+                    "device_id": event.device_id,
+                    "magnitude": fall_alert.triggering_value,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+            for user in push_users:
+                ok, push_detail = results[user.expo_push_token]
+                db.add(
+                    Notification(
+                        alert_id=fall_alert.id,
+                        user_id=user.id,
+                        channel=NotificationChannel.PUSH.value,
+                        status=(NotificationStatus.DELIVERED if ok else NotificationStatus.FAILED).value,
+                        delivered_at=datetime.now(timezone.utc) if ok else None,
+                        error_message=None if ok else push_detail,
                     )
                 )
         db.flush()
