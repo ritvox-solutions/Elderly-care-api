@@ -56,6 +56,15 @@ def test_login_invalid_credentials(client):
     r = client.post("/api/v1/auth/login", json={"email": "nonexistent@caretrack.org", "password": "WrongPassword123"})
     assert r.status_code == 401
 
+
+def test_demo_login_returns_database_caregiver_and_patients(client, db_session):
+    response = client.post("/api/v1/auth/demo-login")
+
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "caregiver@caretrack.health"
+    assert response.json()["user"]["role"] == "CAREGIVER"
+    assert client.get("/api/v1/patients").status_code == 200
+
 def test_unauthorized_access(client):
     client.cookies.clear()
     r = client.get("/api/v1/auth/me")

@@ -69,3 +69,20 @@ def test_patient_onboarding_rejects_duplicate_room(client):
     }
     response = client.post("/api/v1/patients", json=duplicate, headers=headers)
     assert response.status_code == 409
+
+
+def test_assigned_caregiver_can_edit_patient_and_family_email(client, db_session):
+    token = _caregiver_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post("/api/v1/patients", json=_patient_payload(), headers=headers).json()
+
+    response = client.patch(
+        f"/api/v1/patients/{created['id']}",
+        json={"first_name": "Ananya", "email": "patient@example.com", "emergency_contact_email": "family@example.com"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["first_name"] == "Ananya"
+    assert response.json()["email"] == "patient@example.com"
+    assert db_session.query(Patient).filter_by(id=created["id"]).one().emergency_contact_email == "family@example.com"

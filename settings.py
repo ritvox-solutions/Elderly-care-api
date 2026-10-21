@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # Optional when Expo enhanced push security is enabled.
     expo_push_access_token: str = ""
 
+    # One-tap demo login is intentionally configurable for non-demo deployments.
+    enable_demo_login: bool = True
+    demo_caregiver_email: str = "caregiver@caretrack.health"
+    demo_caregiver_password: str = "CareTrackDemo123!"
+
     # Security & JWT
     secret_key: str = "caretrack-dev-secret-key-32-bytes-minimum-security-change-in-prod"
     algorithm: str = "HS256"

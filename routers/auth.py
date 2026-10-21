@@ -6,9 +6,20 @@ from models.audit_log import AuditLog
 from schemas.auth import PushTokenRequest, UserRegisterRequest, UserLoginRequest, UserResponse, TokenResponse
 from core.security import hash_password, verify_password, create_access_token
 from core.dependencies import get_current_active_user
+from settings import get_settings
+from setup_demo_devices import setup_demo_data
 import json
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
+
+
+def _token_response(user: User, response: Response) -> TokenResponse:
+    token = create_access_token(subject=user.id, role=user.role)
+    response.set_cookie(
+        key="access_token", value=f"Bearer {token}", httponly=True,
+        secure=False, samesite="lax", max_age=86400,
+    )
+    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
@@ -57,17 +68,6 @@ def login(req: UserLoginRequest, response: Response, db: Session = Depends(get_d
             detail="User account is deactivated",
         )
 
-    token = create_access_token(subject=user.id, role=user.role)
-
-    response.set_cookie(
-        key="access_token",
-        value=f"Bearer {token}",
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=86400,
-    )
-
     audit = AuditLog(
         user_id=user.id,
         action="USER_LOGIN_SUCCESS",
@@ -77,11 +77,15 @@ def login(req: UserLoginRequest, response: Response, db: Session = Depends(get_d
     db.add(audit)
     db.commit()
 
-    return TokenResponse(
-        access_token=token,
-        token_type="bearer",
-        user=UserResponse.model_validate(user),
-    )
+    return _token_response(user, response)
+
+
+@router.post("/demo-login", response_model=TokenResponse)
+def demo_login(response: Response, db: Session = Depends(get_db)):
+    if not get_settings().enable_demo_login:
+        raise HTTPException(status_code=404, detail="Demo login is disabled")
+    caregiver, _ = setup_demo_data(db)
+    return _token_response(caregiver, response)
 
 @router.post("/logout")
 def logout(response: Response, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
