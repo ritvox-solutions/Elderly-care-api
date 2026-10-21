@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+import uuid
 
 import pytest
 
@@ -25,12 +26,14 @@ from models import (
     NotificationChannel,
     NotificationStatus,
     Patient,
+    PatientThreshold,
     Reading,
     User,
     UserRole,
 )
 from settings import Settings
 from telemetry import parse_telemetry
+from routers.thresholds import get_patient_threshold_dict, PATIENT_THRESHOLDS_CACHE
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +41,15 @@ def clean_cooldowns():
     reset_cooldowns()
     yield
     reset_cooldowns()
+
+
+def test_threshold_lookup_accepts_uuid_patient_id(db_session):
+    patient_id = uuid.uuid4()
+    db_session.add(PatientThreshold(patient_id=str(patient_id), hr_min=61, hr_max=99))
+    db_session.commit()
+    PATIENT_THRESHOLDS_CACHE.pop(str(patient_id), None)
+
+    assert get_patient_threshold_dict(patient_id, db_session)["hr_min"] == 61
 
 
 def fall_event(device_id: str = "wearable-test-01"):
