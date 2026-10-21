@@ -318,6 +318,17 @@ def test_cooldown_suppresses_repeat_falls(db_session, scenario, monkeypatch):
     assert db_session.query(Notification).count() == 1
 
 
+def test_distinct_fall_after_short_cooldown_is_delivered(db_session, scenario, monkeypatch):
+    monkeypatch.setattr(email_transport, "send_smtp_mail", lambda **kwargs: (True, "sent"))
+    ticks = iter((100.0, 111.0))
+    monkeypatch.setattr("core.alerting.time.time", lambda: next(ticks))
+
+    first = process_emergency(fall_event(), db=db_session)
+    second = process_emergency(fall_event(), db=db_session)
+
+    assert len(first) == len(second) == 1
+
+
 def test_unpaired_device_falls_back_to_all_caregivers(db_session, monkeypatch):
     caregiver = User(
         email="fallback@caretrack.org",

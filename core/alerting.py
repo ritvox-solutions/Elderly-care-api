@@ -354,10 +354,15 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
     created: list[Alert] = []
     try:
         now = time.time()
-        cooldown = get_settings().alert_cooldown_seconds
+        settings = get_settings()
 
         pending: list[Emergency] = []
         for emergency in emergencies:
+            cooldown = (
+                settings.fall_alert_cooldown_seconds
+                if emergency.category is AlertCategory.FALL
+                else settings.alert_cooldown_seconds
+            )
             key = (event.device_id, emergency.category.value, emergency.metric)
             last = _last_emitted.get(key)
             if last is not None and (now - last) < cooldown:

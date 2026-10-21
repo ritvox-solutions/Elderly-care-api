@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     smtp_timeout_seconds: int = 10
     # Minimum gap between repeated alerts of the same category per device.
     alert_cooldown_seconds: int = 300
+    fall_alert_cooldown_seconds: int = 10
     # Extra addresses always copied on alert emails (comma separated),
     # e.g. a shared ward mailbox: "ward-a@hospital.org, oncall@hospital.org"
     alert_fallback_recipients: str = ""
