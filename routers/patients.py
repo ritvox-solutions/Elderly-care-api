@@ -56,10 +56,19 @@ def _patient_directory_row(patient: Patient) -> dict:
 
 
 @router.get("", response_model=list[PatientDirectoryResponse])
-def list_patients(db: Session = Depends(get_db)):
+def list_patients(
+    db: Session = Depends(get_db),
+    caregiver: User = Depends(require_role(UserRole.CAREGIVER)),
+):
     return [
         _patient_directory_row(patient)
-        for patient in db.query(Patient).filter(Patient.is_active.is_(True)).all()
+        for patient in db.query(Patient)
+        .join(CaregiverAssignment, CaregiverAssignment.patient_id == Patient.id)
+        .filter(
+            Patient.is_active.is_(True),
+            CaregiverAssignment.caregiver_id == caregiver.id,
+        )
+        .all()
     ]
 
 
