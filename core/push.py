@@ -32,7 +32,7 @@ def send_expo_push(
             "data": data,
             "sound": "default",
             "priority": "high",
-            "channelId": "fall-alerts",
+            "channelId": "fall-alerts-v2",
         }
         for token in tokens
     ]

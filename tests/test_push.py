@@ -32,4 +32,4 @@ def test_send_expo_push_maps_each_ticket(monkeypatch):
     assert results["ExponentPushToken[first]"] == (True, "ticket-1")
     assert results["ExponentPushToken[second]"] == (False, "DeviceNotRegistered")
     assert captured["json"][0]["priority"] == "high"
-    assert captured["json"][0]["channelId"] == "fall-alerts"
+    assert captured["json"][0]["channelId"] == "fall-alerts-v2"
