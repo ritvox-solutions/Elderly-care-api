@@ -154,6 +154,8 @@ def normalized_items(topic: str, sensor: str, data: dict[str, Any]) -> list[tupl
         "pir": "motion",
         "status": "status",
     }
+    temp_valid = data.get("temp_valid")
+    invalid_body_temp = temp_valid is not None and str(temp_valid).strip().lower() in {"false", "0", "no"}
     items: list[tuple[str, Any]] = []
     for key, value in data.items():
         metric = aliases.get(key)
@@ -163,6 +165,8 @@ def normalized_items(topic: str, sensor: str, data: dict[str, Any]) -> list[tupl
             metric = "room_temp"
         elif metric is None and key == "value" and "motion" in topic:
             metric = "motion"
+        if metric == "body_temp" and invalid_body_temp:
+            continue
         if metric:
             items.append((metric, value))
     return items
