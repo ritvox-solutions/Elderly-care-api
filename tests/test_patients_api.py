@@ -102,6 +102,24 @@ def test_assigned_caregiver_can_delete_patient_and_release_devices(client, db_se
     assert client.get("/api/v1/patients", headers=headers).json() == []
 
 
+def test_deleted_patient_devices_can_be_reassigned(client, db_session):
+    token = _caregiver_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post("/api/v1/patients", json=_patient_payload(), headers=headers).json()
+    assert client.delete(f"/api/v1/patients/{created['id']}", headers=headers).status_code == 204
+
+    replacement = _patient_payload() | {
+        "first_name": "Leela",
+        "room_number": "Room 411",
+    }
+    response = client.post("/api/v1/patients", json=replacement, headers=headers)
+
+    assert response.status_code == 201
+    assert response.json()["room_device_id"] == "room-unit-410"
+    devices = db_session.query(Device).all()
+    assert all(sum(pairing.is_active for pairing in device.pairings) == 1 for device in devices)
+
+
 def test_caregiver_cannot_delete_an_unassigned_patient(client):
     owner_token = _caregiver_token(client)
     created = client.post(

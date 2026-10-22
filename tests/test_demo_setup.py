@@ -22,3 +22,17 @@ def test_setup_demo_data_creates_real_directory_and_caregiver(db_session):
     assert db_session.query(User).filter_by(email="caregiver@caretrack.health").count() == 1
     assert db_session.query(Patient).count() == 3
     assert db_session.query(CaregiverAssignment).count() == 3
+
+
+def test_demo_login_setup_does_not_repair_deleted_patients(db_session):
+    _, patients = setup_demo_data(db_session)
+    deleted = patients[0]
+    deleted.is_active = False
+    for pairing in deleted.device_pairings:
+        pairing.is_active = False
+    db_session.commit()
+
+    setup_demo_data(db_session)
+
+    assert deleted.is_active is False
+    assert db_session.query(DevicePairing).filter_by(patient_id=deleted.id, is_active=True).count() == 0

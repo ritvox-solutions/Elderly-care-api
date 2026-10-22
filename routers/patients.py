@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
@@ -104,7 +104,11 @@ def create_patient(
                 .first()
             )
             if active_pairing:
-                raise HTTPException(status_code=409, detail=f"Device {identifier} is already paired")
+                if active_pairing.patient.is_active:
+                    raise HTTPException(status_code=409, detail=f"Device {identifier} is already paired")
+                # Repair pairings left active by deployments that predate patient deletion support.
+                active_pairing.is_active = False
+                active_pairing.unpaired_at = datetime.now(timezone.utc)
             if device.device_type != device_type:
                 raise HTTPException(status_code=409, detail=f"Device {identifier} has the wrong device type")
         else:
@@ -198,5 +202,7 @@ def delete_patient(
     patient.is_active = False
     for pairing in patient.device_pairings:
         pairing.is_active = False
+        pairing.unpaired_at = datetime.now(timezone.utc)
+        pairing.device.status = DeviceStatus.UNPAIRED.value
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

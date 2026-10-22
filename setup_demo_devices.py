@@ -63,6 +63,10 @@ def setup_demo_data(db: Session) -> tuple[User, list[Patient]]:
             db.flush()
         patients.append(patient)
 
+        # A deleted demo patient stays deleted; demo login must not reclaim their devices.
+        if not patient.is_active:
+            continue
+
         assignment = db.query(CaregiverAssignment).filter_by(
             caregiver_id=caregiver.id, patient_id=patient.id
         ).first()
