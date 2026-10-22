@@ -86,3 +86,44 @@ def test_assigned_caregiver_can_edit_patient_and_family_email(client, db_session
     assert response.json()["first_name"] == "Ananya"
     assert response.json()["email"] == "patient@example.com"
     assert db_session.query(Patient).filter_by(id=created["id"]).one().emergency_contact_email == "family@example.com"
+
+
+def test_assigned_caregiver_can_delete_patient_and_release_devices(client, db_session):
+    token = _caregiver_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post("/api/v1/patients", json=_patient_payload(), headers=headers).json()
+
+    response = client.delete(f"/api/v1/patients/{created['id']}", headers=headers)
+
+    assert response.status_code == 204
+    patient = db_session.query(Patient).filter_by(id=created["id"]).one()
+    assert patient.is_active is False
+    assert db_session.query(DevicePairing).filter_by(patient_id=patient.id, is_active=True).count() == 0
+    assert client.get("/api/v1/patients", headers=headers).json() == []
+
+
+def test_caregiver_cannot_delete_an_unassigned_patient(client):
+    owner_token = _caregiver_token(client)
+    created = client.post(
+        "/api/v1/patients",
+        json=_patient_payload(),
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).json()
+    registration = {
+        "email": "other.nurse@caretrack.org",
+        "password": "StrongPassword123!",
+        "full_name": "Other Nurse",
+        "role": "CAREGIVER",
+    }
+    assert client.post("/api/v1/auth/register", json=registration).status_code == 201
+    other_token = client.post(
+        "/api/v1/auth/login",
+        json={"email": registration["email"], "password": registration["password"]},
+    ).json()["access_token"]
+
+    response = client.delete(
+        f"/api/v1/patients/{created['id']}",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+
+    assert response.status_code == 403

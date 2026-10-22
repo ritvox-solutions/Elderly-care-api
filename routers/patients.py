@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from core.dependencies import require_role
@@ -176,3 +176,27 @@ def update_patient(
     db.commit()
     db.refresh(patient)
     return _patient_directory_row(patient)
+
+
+@router.delete("/{patient_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_patient(
+    patient_id: str,
+    db: Session = Depends(get_db),
+    caregiver: User = Depends(require_role(UserRole.CAREGIVER)),
+):
+    """Deactivate an assigned patient and release their paired devices."""
+    patient = db.query(Patient).filter(Patient.id == patient_id, Patient.is_active.is_(True)).first()
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    assigned = db.query(CaregiverAssignment).filter_by(
+        caregiver_id=caregiver.id,
+        patient_id=patient.id,
+    ).first()
+    if assigned is None:
+        raise HTTPException(status_code=403, detail="Patient is not assigned to this caregiver")
+
+    patient.is_active = False
+    for pairing in patient.device_pairings:
+        pairing.is_active = False
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
