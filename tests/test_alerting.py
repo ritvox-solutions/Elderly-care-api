@@ -94,8 +94,11 @@ def scenario(db_session):
     patient = Patient(
         first_name="Eleanor",
         last_name="Vance",
+        email="eleanor.vance@example.com",
         date_of_birth=date(1935, 4, 2),
+        gender="Female",
         room_number="Room 312",
+        medical_notes="Severe osteoporosis and high fall risk",
         emergency_contact_name="Sam Vance",
         emergency_contact_phone="+1-555-0142",
         emergency_contact_email="sam.vance@example.com",
@@ -223,9 +226,22 @@ def test_process_emergency_persists_alert_and_delivers_email(db_session, scenari
     assert note.error_message is None
 
     assert sent["recipients"] == ["nurse.jane@caretrack.org", "sam.vance@example.com"]
-    assert "CRITICAL" in sent["subject"]
-    assert "wearable-test-01" in sent["subject"]
-    assert "Eleanor Vance (Room 312)" in sent["body"]
+    assert sent["subject"] == "URGENT: Possible fall involving Eleanor Vance - Room 312"
+    assert "Dear family member" in sent["body"]
+    assert "listed as an emergency contact" in sent["body"]
+    assert "contact the care facility or the assigned caregiver" in sent["body"]
+    assert "Name: Eleanor Vance" in sent["body"]
+    assert "Age: 91" in sent["body"]
+    assert "Gender: Female" in sent["body"]
+    assert "Room: Room 312" in sent["body"]
+    assert "Patient email: eleanor.vance@example.com" in sent["body"]
+    assert "Medical information: Severe osteoporosis and high fall risk" in sent["body"]
+    assert "Detected: 14 October 2026 at 10:00:00 UTC" in sent["body"]
+    assert "Wearable device: wearable-test-01" in sent["body"]
+    assert "Impact: 3.85 g" in sent["body"]
+    assert "Name: Sam Vance" in sent["body"]
+    assert "Phone: +1-555-0142" in sent["body"]
+    assert "Email: sam.vance@example.com" in sent["body"]
     assert "Fall detected" in sent["body"]
 
     ws_message = alert_message(fall_event(), alert)
@@ -368,7 +384,8 @@ def test_multiple_breaches_batch_into_one_email(db_session, scenario, monkeypatc
     # one Alert row per breach, but a single email per telemetry event
     assert len(alerts) == 2
     assert len(sends) == 1
-    assert "2 emergency alerts" in sends[0]["subject"]
+    assert sends[0]["subject"] == "CareTrack health alert for your family member, Eleanor Vance"
+    assert sends[0]["body"].count("Details:") == 2
     assert db_session.query(Notification).count() == 2
 
 

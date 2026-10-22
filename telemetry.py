@@ -144,6 +144,8 @@ def normalized_items(topic: str, sensor: str, data: dict[str, Any]) -> list[tupl
         "spo2": "spo2",
         "body_temp": "body_temp",
         "body_temperature": "body_temp",
+        "device_temperature": "body_temp",
+        "sensor_temp": "body_temp",
         "fall_detected": "fall_detected",
         "accel_magnitude": "accel_magnitude",
         "humidity": "humidity",

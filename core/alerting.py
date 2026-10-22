@@ -35,6 +35,7 @@ from models import (
     Notification,
     NotificationChannel,
     NotificationStatus,
+    Patient,
     Reading,
     User,
     UserRole,
@@ -242,51 +243,85 @@ def resolve_recipients(db: Session, device_id: str) -> tuple[list[User], list[st
 def build_alert_email(
     emergencies: list[Emergency],
     event: TelemetryEvent,
-    patient_label: str | None,
+    patient: Patient | None,
 ) -> tuple[str, str]:
-    """Render the subject line and plain-text body for one telemetry event.
+    """Render a family-friendly email for one telemetry event.
 
     All emergencies detected on the same event are batched into a single
     email so caregivers get one message per incident, not one per metric.
     """
     top = max(emergencies, key=lambda em: em.severity.value == AlertSeverity.CRITICAL.value)
-    count = len(emergencies)
+    patient_name = f"{patient.first_name} {patient.last_name}" if patient else "Unknown patient"
+    room = patient.room_number or "Not assigned" if patient else "Not assigned"
+    is_fall = any(em.category is AlertCategory.FALL for em in emergencies)
     subject = (
-        f"[CareTrack {top.severity.value}] {count} emergency alert"
-        f"{'s' if count > 1 else ''} - {event.device_id}"
+        f"URGENT: Possible fall involving {patient_name} - {room}"
+        if is_fall
+        else f"CareTrack health alert for your family member, {patient_name}"
     )
+
+    age = None
+    if patient:
+        detected_on = event.timestamp.date()
+        born = patient.date_of_birth
+        age = detected_on.year - born.year - ((detected_on.month, detected_on.day) < (born.month, born.day))
+    impact = event.data.get("accel_magnitude")
+
     lines = [
-        "CareTrack emergency notification",
+        "CARETRACK FAMILY EMERGENCY ALERT",
         "",
-        f"Device     : {event.device_id}",
-        f"Detected   : {event.timestamp.isoformat()}",
-        f"Patient    : {patient_label or 'Not linked to a paired device'}",
+        "Dear family member,",
         "",
-        "Detected emergencies:",
+        f"CareTrack has detected a possible {'fall' if is_fall else 'health emergency'} involving your family member, {patient_name}.",
+        "You are receiving this message because you are listed as an emergency contact.",
+        "Please contact the care facility or the assigned caregiver immediately to confirm their safety.",
+        "",
+        "PATIENT DETAILS",
+        f"Name: {patient_name}",
+        f"Age: {age if age is not None else 'Not available'}",
+        f"Gender: {patient.gender or 'Not provided' if patient else 'Not provided'}",
+        f"Room: {room}",
+        f"Patient email: {patient.email or 'Not provided' if patient else 'Not available'}",
+        f"Medical information: {patient.medical_notes or 'Not provided' if patient else 'Not available'}",
+        "",
+        "FALL INFORMATION" if is_fall else "ALERT INFORMATION",
+        f"Detected: {event.timestamp.strftime('%d %B %Y at %H:%M:%S UTC')}",
+        f"Severity: {top.severity.value}",
+        f"Wearable device: {event.device_id}",
     ]
-    lines += [f"  - [{em.severity.value}] {em.message}" for em in emergencies]
+    if is_fall and isinstance(impact, (int, float)) and not isinstance(impact, bool):
+        lines.append(f"Impact: {impact:.2f} g")
+    lines += [f"Details: {em.message}" for em in emergencies]
+    if patient:
+        lines += [
+            "",
+            "EMERGENCY CONTACT",
+            f"Name: {patient.emergency_contact_name}",
+            f"Phone: {patient.emergency_contact_phone}",
+            f"Email: {patient.emergency_contact_email or 'Not provided'}",
+        ]
     lines += [
         "",
-        "Open the CareTrack dashboard to acknowledge and resolve this alert.",
+        "If you cannot reach the care team and believe your family member is in immediate danger, contact local emergency services.",
+        "",
+        "This is an automated CareTrack alert sent to the patient's emergency contact.",
     ]
     return subject, "\n".join(lines)
 
 
-def _patient_context(db: Session, device_id: str) -> tuple[str | None, str | None]:
-    """Return (patient_id, human label) for a device, or (None, None)."""
+def _patient_context(db: Session, device_id: str) -> Patient | None:
+    """Return the patient paired with a device, when one exists."""
     device = db.query(Device).filter(Device.device_identifier == device_id).first()
     if not device:
-        return None, None
+        return None
     pairing = (
         db.query(DevicePairing)
         .filter(DevicePairing.device_id == device.id, DevicePairing.is_active.is_(True))
         .first()
     )
     if not pairing or pairing.patient is None:
-        return None, None
-    patient = pairing.patient
-    label = f"{patient.first_name} {patient.last_name} ({patient.room_number or 'no room'})"
-    return pairing.patient_id, label
+        return None
+    return pairing.patient
 
 
 def _recent_sensor_context(
@@ -342,7 +377,8 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
     if db is None:
         db = SessionLocal()
 
-    patient_id, label = _patient_context(db, event.device_id)
+    patient = _patient_context(db, event.device_id)
+    patient_id = patient.id if patient else None
     th = get_patient_threshold_dict(patient_id, db)
     context = _recent_sensor_context(db, patient_id, event)
     emergencies = detect_emergencies(event, thresholds=th, context=context)
@@ -380,7 +416,6 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
         if not pending:
             return created
 
-        patient_id, label = _patient_context(db, event.device_id)
         for emergency in pending:
             alert = Alert(
                 patient_id=patient_id,
@@ -405,7 +440,7 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
             detail = "No recipients configured"
             print(f"[ALERT] on {event.device_id}: {detail}")
         else:
-            subject, body = build_alert_email(pending, event, label)
+            subject, body = build_alert_email(pending, event, patient)
             ok, detail = email_transport.send_alert_email(recipients, subject, body)
             status = NotificationStatus.DELIVERED if ok else NotificationStatus.FAILED
             print(
@@ -431,8 +466,8 @@ def process_emergency(event: TelemetryEvent, db: Session | None = None) -> list[
         fall_alert = next((alert for alert in created if alert.category == AlertCategory.FALL.value), None)
         push_users = [user for user in caregivers if user.expo_push_token]
         if fall_alert and push_users:
-            patient_name = label.rsplit(" (", 1)[0] if label else "Patient"
-            room_number = label.rsplit(" (", 1)[1].rstrip(")") if label and " (" in label else "Unknown room"
+            patient_name = f"{patient.first_name} {patient.last_name}" if patient else "Patient"
+            room_number = patient.room_number if patient and patient.room_number else "Unknown room"
             results = send_expo_push(
                 [user.expo_push_token for user in push_users],
                 title="CRITICAL: FALL DETECTED",
